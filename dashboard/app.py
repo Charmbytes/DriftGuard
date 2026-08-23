@@ -25,7 +25,7 @@ import streamlit as st
 API_BASE = os.getenv("API_BASE_URL", "http://localhost:8000")
 REQUEST_TIMEOUT = 180  # a full probe run can take a while on first model load
 
-st.set_page_config(page_title="DriftGuard", page_icon="🛡️", layout="wide")
+st.set_page_config(page_title="DriftGuard", layout="wide")
 
 STATUS_COLOUR = {"green": "#1a9850", "yellow": "#e6a700", "red": "#d73027", "unknown": "#888888"}
 STATUS_LABEL = {"green": "HEALTHY", "yellow": "WARNING", "red": "BREACH", "unknown": "NO DATA"}
@@ -57,7 +57,7 @@ def api_post(path: str, payload: Optional[Dict[str, Any]] = None) -> Optional[Di
 # --------------------------------------------------------------------------
 # Header
 # --------------------------------------------------------------------------
-st.title("🛡️ DriftGuard")
+st.title("DriftGuard")
 st.caption(
     "Continuous behavioural re-certification and capability-token revocation for LLM agents "
     "— agent under test: **customer-support refund agent**"
@@ -75,7 +75,7 @@ latest = status["latest_run"]
 # ---- Revocation banner: the headline event of the demo --------------------
 if capability["status"] == "revoked":
     st.error(
-        f"### 🚨 CAPABILITY TOKEN REVOKED\n"
+        f"### CAPABILITY TOKEN REVOKED\n"
         f"**{agent['active_version']}** build no longer holds `{capability['scope']}`. "
         f"Refund auto-approval is disabled; every request now escalates to a human.\n\n"
         f"**Revoked at:** {capability.get('revoked_at')}  \n"
@@ -83,7 +83,7 @@ if capability["status"] == "revoked":
     )
 elif capability["status"] == "active":
     st.success(
-        f"### ✅ CAPABILITY ACTIVE — `{capability['scope']}`\n"
+        f"### CAPABILITY ACTIVE — `{capability['scope']}`\n"
         f"Agent may auto-approve refunds up to ₹{agent['auto_approve_cap']:,.0f}. "
         f"Token `{capability.get('jti','')[:8]}…` valid until {capability.get('expires_at')}"
     )
@@ -115,35 +115,35 @@ st.subheader("Demo controls")
 b1, b2, b3, b4, b5 = st.columns(5)
 
 with b1:
-    if st.button("💉 Inject drift", use_container_width=True,
+    if st.button("Inject drift", use_container_width=True,
                  disabled=agent["active_version"] == "drifted",
                  help="Swap in the drifted build — simulates a prompt-template change shipped to production."):
         api_post("/api/agent/version", {"version": "drifted"})
         st.rerun()
 
 with b2:
-    if st.button("↩️ Restore baseline", use_container_width=True,
+    if st.button("Restore baseline", use_container_width=True,
                  disabled=agent["active_version"] == "baseline",
                  help="Roll the agent back to the certified build."):
         api_post("/api/agent/version", {"version": "baseline"})
         st.rerun()
 
 with b3:
-    if st.button("🔬 Run probe suite", use_container_width=True, type="primary",
+    if st.button("Run probe suite", use_container_width=True, type="primary",
                  help="Shadow-test the live build against the certified baseline."):
         with st.spinner("Running 42 probes and scoring against baseline…"):
             api_post("/api/probes/run", {"trigger": "dashboard"})
         st.rerun()
 
 with b4:
-    if st.button("🔑 Reinstate token", use_container_width=True,
+    if st.button("Reinstate token", use_container_width=True,
                  disabled=capability["status"] == "active",
                  help="Post-remediation: re-grant the capability after rollback."):
         api_post("/api/token/reinstate")
         st.rerun()
 
 with b5:
-    if st.button("🧹 Reset demo", use_container_width=True,
+    if st.button("Reset demo", use_container_width=True,
                  help="Wipe history, re-certify the baseline, issue a fresh token."):
         with st.spinner("Re-certifying baseline…"):
             api_post("/api/demo/reset")
@@ -265,11 +265,11 @@ approvals_summary = status.get("approvals", {"counts": {}, "pending_value": 0})
 pending_count = approvals_summary["counts"].get("pending", 0)
 
 tab_evidence, tab_agent, tab_approvals, tab_audit, tab_suite = st.tabs([
-    "🔍 Evidence",
-    "💬 Live agent",
-    f"🧑‍⚖️ Human approvals ({pending_count})" if pending_count else "🧑‍⚖️ Human approvals",
-    "🔗 Audit log",
-    "📋 Probe suite",
+    "Evidence",
+    "Live agent",
+    f"Human approvals ({pending_count})" if pending_count else "Human approvals",
+    "Audit log",
+    "Probe suite",
 ])
 
 # ---- Evidence -------------------------------------------------------------
@@ -364,7 +364,7 @@ with tab_agent:
                     st.warning(
                         f"**Queued for human approval — #HR-{req['id']:04d}** "
                         f"(₹{req['amount']:,.0f}). The refund is not lost: open the "
-                        f"**🧑‍⚖️ Human approvals** tab to sign it off."
+                        f"**Human approvals** tab to sign it off."
                     )
             st.markdown("**Agent reply to customer:**")
             st.info(reply["reply"])
@@ -410,14 +410,14 @@ with tab_approvals:
                 )
                 a, b, _ = st.columns([1, 1, 3])
                 with a:
-                    if st.button("✅ Approve refund", key=f"ok_{r['id']}",
+                    if st.button("Approve refund", key=f"ok_{r['id']}",
                                  type="primary", use_container_width=True):
                         api_post(f"/api/approvals/{r['id']}/decide",
                                  {"decision": "approved", "reviewer": "panel-reviewer",
                                   "note": note})
                         st.rerun()
                 with b:
-                    if st.button("❌ Reject", key=f"no_{r['id']}", use_container_width=True):
+                    if st.button("Reject", key=f"no_{r['id']}", use_container_width=True):
                         api_post(f"/api/approvals/{r['id']}/decide",
                                  {"decision": "rejected", "reviewer": "panel-reviewer",
                                   "note": note})
@@ -453,12 +453,12 @@ with tab_audit:
         if verify:
             if verify["valid"]:
                 st.success(
-                    f"✅ Chain intact — {verify['rows_checked']} rows verified from genesis. "
+                    f"Chain intact — {verify['rows_checked']} rows verified from genesis. "
                     f"Head: `{verify['head_hash'][:24]}…`"
                 )
             else:
                 st.error(
-                    f"❌ TAMPERING DETECTED at row {verify['broken_at_id']} — {verify['reason']}"
+                    f"TAMPERING DETECTED at row {verify['broken_at_id']} — {verify['reason']}"
                 )
 
     log = api_get("/api/audit/log", limit=60)

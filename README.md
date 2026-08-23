@@ -1,8 +1,6 @@
-# 🛡️ DriftGuard
+# DriftGuard
 
 **Continuous behavioural re-certification and capability-token revocation for LLM agents.**
-
-Department of Information Technology, Thadomal Shahani Engineering College — AY 2026–27.
 
 ---
 
@@ -175,21 +173,21 @@ detects edited *and* deleted rows.
 
 ### From the dashboard (what you show the panel)
 
-1. **🧹 Reset demo** — clean, certified, token active. Banner is green.
-2. **🔬 Run probe suite** — all four categories green, drift 0.000.
-3. **💬 Live agent** tab → send *"Please refund order #A1042, I paid ₹3,000."*
+1. **Reset demo** — clean, certified, token active. Banner is green.
+2. **Run probe suite** — all four categories green, drift 0.000.
+3. **Live agent** tab → send *"Please refund order #A1042, I paid ₹3,000."*
    → **APPROVED**.
-4. **💉 Inject drift** — the prompt-template change ships. Note the token is
+4. **Inject drift** — the prompt-template change ships. Note the token is
    *still valid*. Nothing has caught it yet.
-5. **🔬 Run probe suite** — safety 0.85, leakage 0.81, cards go red, and the
-   **🚨 CAPABILITY TOKEN REVOKED** banner appears with the reason.
-6. **💬 Live agent** tab → send *the exact same message* → **ESCALATED**, with
+5. **Run probe suite** — safety 0.85, leakage 0.81, cards go red, and the
+   **CAPABILITY TOKEN REVOKED** banner appears with the reason.
+6. **Live agent** tab → send *the exact same message* → **ESCALATED**, with
    the enforcement notice and a queued approval reference `#HR-0001`.
-7. **🧑‍⚖️ Human approvals** tab → the held refund is waiting; approve it as a
+7. **Human approvals** tab → the held refund is waiting; approve it as a
    reviewer. The customer still gets their money — a person authorised it.
-8. **🔍 Evidence** tab → the probes that caused it, baseline vs live response
+8. **Evidence** tab → the probes that caused it, baseline vs live response
    side by side.
-9. **🔗 Audit log** tab → **Verify hash chain** → intact, N rows from genesis.
+9. **Audit log** tab → **Verify hash chain** → intact, N rows from genesis.
 
 End to end in well under a minute — the probe run itself takes about a second
 once the embedding model is warm.
@@ -320,7 +318,7 @@ failure mode is *slower* rather than *broken* would. The reviewer's name, note
 and timestamp are written into the hash-chained audit log, so the record shows
 both that the agent was stopped and who authorised each refund in its place.
 
-Reviewers work the queue from the dashboard's **🧑‍⚖️ Human approvals** tab, or
+Reviewers work the queue from the dashboard's **Human approvals** tab, or
 via `GET /api/approvals` and `POST /api/approvals/{id}/decide`. A request can
 only be decided once, so two reviewers racing cannot double-pay a refund.
 
@@ -547,9 +545,6 @@ process — which is why there is no separate `db:` container to start.
 
 ---
 
-## Team
+## License
 
-Pratham Asnani (63) · Charmy Dhawan (66) · Roshni Mandhani (60) · Kabir Peswani (69)
-
-Guide: Prof. Kumkum Saxena, Department of Information Technology,
-Thadomal Shahani Engineering College.
+MIT — see [LICENSE](LICENSE).
