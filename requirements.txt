@@ -1,0 +1,25 @@
+# --- API service -----------------------------------------------------------
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+python-dotenv==1.0.1
+
+# --- Capability tokens -----------------------------------------------------
+PyJWT==2.10.1
+
+# --- Scheduling ------------------------------------------------------------
+APScheduler==3.11.0
+
+# --- LLM providers (OpenAI / Groq are called over plain HTTP) ---------------
+requests==2.32.3
+
+# --- Behavioral profiler ---------------------------------------------------
+# Pulls in torch (CPU). The Dockerfile installs the CPU-only wheel to keep the
+# image small. If this cannot be installed, DriftGuard falls back to a lexical
+# similarity and reports the degraded backend -- see scoring/embeddings.py.
+sentence-transformers==3.3.1
+
+# --- Dashboard -------------------------------------------------------------
+streamlit==1.41.1
+pandas==2.2.3
+altair==5.5.0

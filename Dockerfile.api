@@ -1,0 +1,39 @@
+# DriftGuard API service
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONIOENCODING=utf-8 \
+    # Keep the embedding model inside the image so the container starts fast
+    # and works with no network at demo time.
+    HF_HOME=/opt/hf \
+    TRANSFORMERS_OFFLINE=0
+
+WORKDIR /app
+
+# Install CPU-only torch first: the default wheel pulls ~2GB of CUDA libraries
+# that this project never uses.
+RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch==2.5.1
+
+COPY requirements.txt .
+# Streamlit, altair and pandas belong to the dashboard image, not this one.
+RUN grep -viE '^(streamlit|altair|pandas)==' requirements.txt > /tmp/api-reqs.txt \
+    && pip install --no-cache-dir -r /tmp/api-reqs.txt
+
+# Bake the sentence-transformer into the image at build time. Without this the
+# first probe run would try to download it, which fails on an offline machine.
+RUN python -c "from sentence_transformers import SentenceTransformer; \
+    SentenceTransformer('all-MiniLM-L6-v2')"
+
+COPY driftguard ./driftguard
+
+# SQLite lives on a named volume so runs survive a container restart.
+RUN mkdir -p /app/data
+ENV DRIFTGUARD_DATA_DIR=/app/data
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=90s --retries=5 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"
+
+CMD ["uvicorn", "driftguard.api:app", "--host", "0.0.0.0", "--port", "8000"]

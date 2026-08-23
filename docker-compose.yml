@@ -1,0 +1,81 @@
+# DriftGuard — full stack.
+#
+#   docker compose up --build
+#
+#   Dashboard : http://localhost:8501
+#   API docs  : http://localhost:8000/docs
+#
+# A note on "the DB service": DriftGuard persists to SQLite, which is an
+# embedded database — it runs inside the API process, so it is a *volume*
+# (`driftguard-data`), not a separate container. There is no meaningful
+# `db:` service to start for SQLite. See README → Future work for the
+# Postgres swap, which is a one-file change to driftguard/db.py plus the
+# service block sketched at the bottom of this file.
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: driftguard-api
+    ports:
+      - "8000:8000"
+    environment:
+      # mock = deterministic agent, no API key, works offline. Switch to
+      # groq or openai in .env to certify a real LLM.
+      LLM_PROVIDER: ${LLM_PROVIDER:-mock}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_MODEL: ${GROQ_MODEL:-llama-3.1-8b-instant}
+
+      # Blank by default: the API generates a random key on first run and
+      # persists it to the data volume. Set JWT_SECRET in .env to pin it.
+      JWT_SECRET: ${JWT_SECRET:-}
+      REFUND_AUTO_APPROVE_CAP: ${REFUND_AUTO_APPROVE_CAP:-5000}
+
+      # Off by default: a 15-minute tick is not watchable in a viva, so the
+      # demo triggers runs from the dashboard. Set true (and interval 1) to
+      # show the unattended loop.
+      ENABLE_SCHEDULER: ${ENABLE_SCHEDULER:-false}
+      PROBE_INTERVAL_MINUTES: ${PROBE_INTERVAL_MINUTES:-15}
+
+      DRIFTGUARD_DATA_DIR: /app/data
+    volumes:
+      - driftguard-data:/app/data
+    restart: unless-stopped
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+    container_name: driftguard-dashboard
+    ports:
+      - "8501:8501"
+    environment:
+      # Container-to-container: reach the API by its service name.
+      API_BASE_URL: http://api:8000
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  driftguard-data:
+
+# ---------------------------------------------------------------------------
+# Postgres path (not enabled — see README → Future work)
+#
+#   db:
+#     image: postgres:16-alpine
+#     environment:
+#       POSTGRES_DB: driftguard
+#       POSTGRES_USER: driftguard
+#       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+#     volumes:
+#       - driftguard-pg:/var/lib/postgresql/data
+#
+# Then point the API at it with DATABASE_URL and replace the sqlite3 calls in
+# driftguard/db.py. The schema in db.py is standard SQL and ports directly;
+# only the connection handling and the AUTOINCREMENT keyword need changing.
+# ---------------------------------------------------------------------------

@@ -1,0 +1,27 @@
+# DriftGuard Streamlit dashboard
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONIOENCODING=utf-8
+
+WORKDIR /app
+
+# The dashboard is a thin HTTP client: it needs Streamlit, plotting and
+# requests, but none of the ML stack.
+RUN pip install --no-cache-dir \
+    streamlit==1.41.1 \
+    pandas==2.2.3 \
+    altair==5.5.0 \
+    requests==2.32.3
+
+COPY dashboard ./dashboard
+
+EXPOSE 8501
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=5 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')"
+
+CMD ["streamlit", "run", "dashboard/app.py", \
+     "--server.port=8501", "--server.address=0.0.0.0", \
+     "--server.headless=true", "--browser.gatherUsageStats=false"]

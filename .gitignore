@@ -1,0 +1,90 @@
+# ---------------------------------------------------------------------------
+# Secrets -- never commit these
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.local
+
+# Generated JWT signing key (created on first run inside data/)
+.jwt_secret
+
+# Credentials, keys, certificates
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+secrets/
+credentials.json
+service-account*.json
+
+# Streamlit stores API keys here
+.streamlit/secrets.toml
+
+# ---------------------------------------------------------------------------
+# Runtime data -- the SQLite DB holds live capability tokens
+# ---------------------------------------------------------------------------
+data/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+ENV/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.ipynb_checkpoints/
+
+# ---------------------------------------------------------------------------
+# Model / package caches
+# ---------------------------------------------------------------------------
+.cache/
+hf_home/
+.huggingface/
+sentence_transformers_cache/
+node_modules/
+
+# ---------------------------------------------------------------------------
+# Logs and scratch output
+# ---------------------------------------------------------------------------
+*.log
+logs/
+build.log
+up.log
+rebuild.log
+
+# ---------------------------------------------------------------------------
+# Editors / OS
+# ---------------------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Merge/patch leftovers
+*.orig
+*.rej
