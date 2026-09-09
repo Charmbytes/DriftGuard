@@ -394,6 +394,34 @@ only be decided once, so two reviewers racing cannot double-pay a refund.
 
 ---
 
+## Deployment
+
+**DriftGuard itself is not deployable to a static host.** It needs long-running
+processes (`uvicorn`, Streamlit, the APScheduler loop), a writable persistent
+disk (the SQLite token store and audit chain), and ~2 GB of PyTorch for the
+embedding model. Netlify, GitHub Pages and Vercel's static tier can host none
+of that. Run it with `docker compose up`, or use a host that runs containers
+with a persistent volume.
+
+What *is* deployable as a static site is the explainer page:
+
+```bash
+python scripts/build_site.py
+```
+
+That wraps `docs/explainer.html` (written as a fragment) into a standalone
+document under `site/`, which `netlify.toml` publishes. Keeping one source file
+and wrapping it at build time stops the public page drifting from the original.
+
+To put it on Netlify: in the Netlify dashboard choose **Add new site → Import
+an existing project**, pick this repository, and accept the settings from
+`netlify.toml` (build `python3 scripts/build_site.py`, publish `site`). Every
+push to `main` then redeploys automatically.
+
+`site/` is gitignored — it is build output, regenerated on each deploy.
+
+---
+
 ## Explainer for non-technical audiences
 
 `docs/explainer.html` is a standalone, plain-language walkthrough of the whole

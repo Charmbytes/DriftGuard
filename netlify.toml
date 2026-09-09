@@ -1,0 +1,32 @@
+# Netlify configuration.
+#
+# IMPORTANT: this publishes the static *explainer page* only, not DriftGuard
+# itself. Netlify has no long-running processes, no persistent disk and a hard
+# function timeout, so it cannot host the FastAPI service, the Streamlit
+# dashboard, the APScheduler loop, or the SQLite audit chain. Run the app with
+# `docker compose up` (see README), or host it somewhere that runs containers.
+#
+# The build wraps docs/explainer.html into a standalone document under site/,
+# so the page has a single source of truth.
+
+[build]
+  command = "python3 scripts/build_site.py"
+  publish = "site"
+
+[build.environment]
+  PYTHON_VERSION = "3.11"
+
+# The explainer contains no scripts beyond its own inline waffle renderer and
+# loads nothing external, so the policy can be strict.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Content-Security-Policy = "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; font-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    X-Frame-Options = "DENY"
+
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"

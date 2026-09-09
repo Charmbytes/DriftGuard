@@ -88,3 +88,6 @@ desktop.ini
 # Merge/patch leftovers
 *.orig
 *.rej
+
+# Generated static site (built by scripts/build_site.py)
+site/
