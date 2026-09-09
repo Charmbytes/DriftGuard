@@ -32,7 +32,7 @@ from ..agent import refund_agent
 from ..audit import log_event
 from ..db import get_conn, init_db
 from ..scoring import drift as drift_mod
-from ..scoring import embeddings, rules
+from ..scoring import embeddings, rules, sequential
 from ..tokens import ensure_token, revoke_token
 from .suite import CATEGORIES, get_suite
 
@@ -193,6 +193,66 @@ def _score_against_baseline(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]
     return scored
 
 
+def _run_history() -> List[Dict[str, Any]]:
+    """
+    Completed runs, oldest first -- the input CUSUM accumulates over.
+
+    Scoped to the *current capability period*: only runs since the active token
+    was issued. This matters. CUSUM is a sequential test over one process, and
+    a reinstatement means the agent was remediated and re-certified -- it is
+    a different process from here on. Carrying the old accumulator across a
+    reinstatement would re-revoke a freshly fixed agent within a run or two,
+    for drift it no longer has.
+
+    Only build and category scores are needed, so this stays cheap.
+    """
+    from ..tokens import get_latest_token  # local import avoids a cycle
+
+    token = get_latest_token()
+    since = token["issued_at"] if token else None
+
+    with get_conn() as conn:
+        if since:
+            rows = conn.execute(
+                "SELECT agent_version, category_scores FROM probe_runs "
+                "WHERE finished_at IS NOT NULL AND started_at >= ? ORDER BY id ASC",
+                (since,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT agent_version, category_scores FROM probe_runs "
+                "WHERE finished_at IS NOT NULL ORDER BY id ASC"
+            ).fetchall()
+    history = []
+    for r in rows:
+        history.append({
+            "agent_version": r["agent_version"],
+            "category_scores": json.loads(r["category_scores"] or "{}"),
+        })
+    return history
+
+
+def _baseline_probe_scores() -> List[float]:
+    """
+    Per-probe drift scores from the most recent run of the certified build.
+
+    This is PSI's "expected" distribution. Falls back to an all-zero
+    distribution matching the suite size when no baseline run exists yet,
+    which is what a perfectly-certified agent would produce anyway.
+    """
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT id FROM probe_runs WHERE agent_version='baseline' "
+            "AND finished_at IS NOT NULL ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        if row is None:
+            return [0.0] * len(get_suite())
+        scores = conn.execute(
+            "SELECT drift_score FROM probe_results WHERE run_id=?", (row["id"],)
+        ).fetchall()
+    return [s["drift_score"] for s in scores] or [0.0] * len(get_suite())
+
+
 # ==========================================================================
 # Full run
 # ==========================================================================
@@ -246,6 +306,28 @@ def run_probe_suite(
     explanation = drift_mod.explain(aggregated, scored)
     finished_at = _now()
 
+    # --- sequential detection over the run history ------------------------
+    # Fixed thresholds judge this run alone. CUSUM reads every run before it,
+    # which is the only way to catch an agent that drifts a little each cycle
+    # without ever tripping a single-run threshold.
+    history = _run_history()
+    history.append({
+        "agent_version": target_version,
+        "category_scores": aggregated["category_scores"],
+    })
+    cusum = sequential.evaluate(history, CATEGORIES)
+
+    # CUSUM needs a few runs before it is allowed to act, so one noisy early
+    # run cannot pull a capability before any baseline history exists.
+    cusum_may_enforce = (
+        config.CUSUM_ENFORCES and len(history) >= config.CUSUM_MIN_RUNS
+    )
+
+    psi_result = sequential.psi(
+        expected=_baseline_probe_scores(),
+        actual=[s["drift_score"] for s in scored],
+    )
+
     # --- persist ----------------------------------------------------------
     with get_conn(write=True) as conn:
         for s in scored:
@@ -262,10 +344,13 @@ def run_probe_suite(
             )
         conn.execute(
             "UPDATE probe_runs SET finished_at=?, overall_score=?, category_scores=?, "
-            "breached=? WHERE id=?",
+            "breached=?, cusum_scores=?, cusum_alarming=?, psi_score=? WHERE id=?",
             (finished_at, aggregated["overall_score"],
              json.dumps(aggregated["category_scores"]),
-             json.dumps(aggregated["breached"]), run_id),
+             json.dumps(aggregated["breached"]),
+             json.dumps({c: v["value"] for c, v in cusum["per_category"].items()}),
+             json.dumps(cusum["alarming"]),
+             psi_result["psi"], run_id),
         )
 
     log_event("drift_scored", {
@@ -280,25 +365,49 @@ def run_probe_suite(
     })
 
     # --- enforce ----------------------------------------------------------
-    revocation: Dict[str, Any] = {"revoked": False}
-    if aggregated["should_revoke"] and auto_revoke:
-        reason = (
-            f"Automatic revocation after probe run #{run_id}: "
-            + "; ".join(explanation["reasons"])
+    # Two independent detectors can pull the token. The threshold detector
+    # catches a sudden collapse; CUSUM catches a slow slide that no single run
+    # would flag. Whichever fires, the reason recorded says which one it was.
+    cusum_triggers = cusum["revoke_categories"] if cusum_may_enforce else []
+    should_revoke = aggregated["should_revoke"] or bool(cusum_triggers)
+
+    if aggregated["should_revoke"]:
+        detector = "threshold"
+        reason_detail = "; ".join(explanation["reasons"])
+    elif cusum_triggers:
+        detector = "cusum"
+        reason_detail = "; ".join(
+            f"{c}: CUSUM {cusum['per_category'][c]['value']:.2f} exceeds "
+            f"{cusum['per_category'][c]['threshold']:.2f} accumulated over "
+            f"{cusum['per_category'][c]['n_runs']} runs "
+            f"(no single run breached its {config.CATEGORY_THRESHOLDS[c]:.2f} threshold)"
+            for c in cusum_triggers
         )
+    else:
+        detector = None
+        reason_detail = ""
+
+    revocation: Dict[str, Any] = {"revoked": False}
+    if should_revoke and auto_revoke:
+        reason = f"Automatic revocation after probe run #{run_id} [{detector}]: {reason_detail}"
         revocation = revoke_token(
             reason=reason,
             evidence={
                 "run_id": run_id,
                 "agent_version": target_version,
+                "detector": detector,
                 "category_scores": aggregated["category_scores"],
                 "breached": aggregated["breached"],
+                "cusum": {c: v["value"] for c, v in cusum["per_category"].items()},
+                "cusum_alarming": cusum["alarming"],
+                "psi": psi_result["psi"],
                 "top_offenders": explanation["top_offenders"],
             },
         )
         if revocation.get("revoked"):
             with get_conn(write=True) as conn:
-                conn.execute("UPDATE probe_runs SET revoked=1 WHERE id=?", (run_id,))
+                conn.execute("UPDATE probe_runs SET revoked=1, detector=? WHERE id=?",
+                             (detector, run_id))
 
     return {
         "run_id": run_id,
@@ -310,6 +419,10 @@ def run_probe_suite(
         "n_probes": len(suite),
         **aggregated,
         "explanation": explanation,
+        "cusum": cusum,
+        "cusum_enforcing": cusum_may_enforce,
+        "psi": psi_result,
+        "detector": detector,
         "revocation": revocation,
         "results": scored,
     }

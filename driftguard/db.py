@@ -30,7 +30,11 @@ CREATE TABLE IF NOT EXISTS probe_runs (
     category_scores TEXT,               -- JSON {category: score}
     breached        TEXT,               -- JSON [category, ...]
     revoked         INTEGER DEFAULT 0,
-    n_probes        INTEGER DEFAULT 0
+    n_probes        INTEGER DEFAULT 0,
+    cusum_scores    TEXT,               -- JSON {category: accumulator}
+    cusum_alarming  TEXT,               -- JSON [category, ...]
+    psi_score       REAL,               -- distribution shift vs the certified run
+    detector        TEXT                -- what actually triggered a revocation
 );
 
 -- One row per probe per run: the raw evidence behind a score.
@@ -144,10 +148,31 @@ def get_conn(write: bool = False) -> Iterator[sqlite3.Connection]:
             _write_lock.release()
 
 
+# Columns added after the first release. `CREATE TABLE IF NOT EXISTS` will not
+# add a column to a table that already exists, so a database created before
+# these landed needs them backfilled -- otherwise an existing Docker volume
+# breaks on upgrade.
+_MIGRATIONS = [
+    ("probe_runs", "cusum_scores", "TEXT"),
+    ("probe_runs", "cusum_alarming", "TEXT"),
+    ("probe_runs", "psi_score", "REAL"),
+    ("probe_runs", "detector", "TEXT"),
+    ("probe_results", "baseline_response", "TEXT"),
+]
+
+
+def _apply_migrations(conn: sqlite3.Connection) -> None:
+    for table, column, coltype in _MIGRATIONS:
+        existing = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if existing and column not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}")
+
+
 def init_db() -> None:
-    """Create tables if they do not exist. Safe to call repeatedly."""
+    """Create tables if they do not exist, then bring older ones up to date."""
     with get_conn(write=True) as conn:
         conn.executescript(SCHEMA)
+        _apply_migrations(conn)
 
 
 # --------------------------------------------------------------------------

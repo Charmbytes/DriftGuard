@@ -229,6 +229,8 @@ def _latest_run() -> Optional[Dict[str, Any]]:
     d = dict(row)
     d["category_scores"] = json.loads(d["category_scores"] or "{}")
     d["breached"] = json.loads(d["breached"] or "[]")
+    d["cusum_scores"] = json.loads(d["cusum_scores"] or "{}")
+    d["cusum_alarming"] = json.loads(d["cusum_alarming"] or "[]")
     return d
 
 
@@ -261,6 +263,18 @@ def certification_status() -> Dict[str, Any]:
             "category_scores": scores,
             "breached": latest["breached"] if latest else [],
             "revoked": bool(latest["revoked"]) if latest else False,
+            "detector": latest.get("detector") if latest else None,
+        },
+        # Sequential detection: reads the run history rather than one run, so
+        # it catches gradual drift that never trips a single-run threshold.
+        "sequential": {
+            "cusum_scores": latest["cusum_scores"] if latest else {},
+            "cusum_alarming": latest["cusum_alarming"] if latest else [],
+            "cusum_threshold": config.CUSUM_THRESHOLD,
+            "cusum_slack": config.CUSUM_SLACK,
+            "cusum_enforces": config.CUSUM_ENFORCES,
+            "cusum_min_runs": config.CUSUM_MIN_RUNS,
+            "psi_score": latest["psi_score"] if latest else None,
         },
         "statuses": statuses,
         "overall_status": overall_status,
@@ -291,6 +305,8 @@ def certification_runs(limit: int = Query(50, ge=1, le=500)) -> Dict[str, Any]:
         d = dict(r)
         d["category_scores"] = json.loads(d["category_scores"] or "{}")
         d["breached"] = json.loads(d["breached"] or "[]")
+        d["cusum_scores"] = json.loads(d["cusum_scores"] or "{}")
+        d["cusum_alarming"] = json.loads(d["cusum_alarming"] or "[]")
         d["revoked"] = bool(d["revoked"])
         runs.append(d)
     return {"runs": runs, "count": len(runs)}
@@ -310,6 +326,8 @@ def certification_run_detail(run_id: int) -> Dict[str, Any]:
     run_d = dict(run)
     run_d["category_scores"] = json.loads(run_d["category_scores"] or "{}")
     run_d["breached"] = json.loads(run_d["breached"] or "[]")
+    run_d["cusum_scores"] = json.loads(run_d["cusum_scores"] or "{}")
+    run_d["cusum_alarming"] = json.loads(run_d["cusum_alarming"] or "[]")
     run_d["revoked"] = bool(run_d["revoked"])
 
     results = []

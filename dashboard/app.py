@@ -112,13 +112,22 @@ st.divider()
 # Demo controls
 # --------------------------------------------------------------------------
 st.subheader("Demo controls")
-b1, b2, b3, b4, b5 = st.columns(5)
+b1, b1b, b2, b3, b4, b5 = st.columns(6)
 
 with b1:
     if st.button("Inject drift", use_container_width=True,
                  disabled=agent["active_version"] == "drifted",
                  help="Swap in the drifted build — simulates a prompt-template change shipped to production."):
         api_post("/api/agent/version", {"version": "drifted"})
+        st.rerun()
+
+with b1b:
+    if st.button("Inject subtle drift", use_container_width=True,
+                 disabled=agent["active_version"] == "subtle",
+                 help="The gently-drifted build: its ceiling crept from ₹5,000 to ₹7,000. "
+                      "Every single run scores BELOW every fixed threshold — only CUSUM, "
+                      "accumulating across runs, ever catches it. Run the suite 3-4 times."):
+        api_post("/api/agent/version", {"version": "subtle"})
         st.rerun()
 
 with b2:
@@ -192,6 +201,73 @@ else:
     )
 
 st.divider()
+
+# --------------------------------------------------------------------------
+# Sequential detection (CUSUM)
+# --------------------------------------------------------------------------
+seq = status.get("sequential", {})
+cusum_scores = seq.get("cusum_scores") or {}
+
+if cusum_scores:
+    st.subheader("Accumulated drift (CUSUM)")
+    st.caption(
+        "The cards above judge **this run alone**. CUSUM reads the whole run history and "
+        "accumulates how far each run sits above the certified baseline, forgiving "
+        f"{seq.get('cusum_slack', 0.05):.2f} per run as noise. It is the only detector that "
+        "catches an agent drifting a little every cycle without ever tripping a single-run "
+        "threshold. Resets when a token is reinstated."
+    )
+    ccols = st.columns(4)
+    for col, category in zip(ccols, ["accuracy", "safety", "leakage", "tone"]):
+        value = cusum_scores.get(category, 0.0)
+        limit = seq.get("cusum_threshold", 0.25)
+        alarming = category in (seq.get("cusum_alarming") or [])
+        pct = min(1.0, value / limit) if limit else 0.0
+        colour = STATUS_COLOUR["red"] if alarming else (
+            STATUS_COLOUR["yellow"] if pct >= 0.7 else STATUS_COLOUR["green"])
+        with col:
+            st.markdown(
+                f"""
+                <div style="padding:0.6rem 0.9rem;border-radius:6px;
+                            background:rgba(128,128,128,0.08);">
+                  <div style="font-size:0.8rem;text-transform:uppercase;opacity:0.75;">
+                    {category}
+                  </div>
+                  <div style="font-size:1.6rem;font-weight:700;color:{colour};">
+                    {value:.3f}
+                  </div>
+                  <div style="height:5px;background:rgba(128,128,128,0.2);border-radius:3px;
+                              overflow:hidden;margin:0.35rem 0;">
+                    <div style="width:{pct * 100:.0f}%;height:100%;background:{colour};"></div>
+                  </div>
+                  <div style="font-size:0.75rem;opacity:0.75;">
+                    alarms at {limit:.2f} · <b>{'ALARM' if alarming else 'accumulating'}</b>
+                  </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+    # Key off the revocation reason, not the latest run: the run that pulled the
+    # token is usually not the most recent one by the time anyone looks.
+    revoked_by_cusum = "[cusum]" in (capability.get("revoked_reason") or "")
+    if revoked_by_cusum:
+        st.error(
+            "**This revocation came from CUSUM, not a threshold.** No individual run "
+            "breached its limit — the evidence accumulated across runs until it was "
+            "undeniable. A single-run detector would still be reporting green."
+        )
+    psi_val = seq.get("psi_score")
+    if psi_val is not None:
+        reading = ("no meaningful shift" if psi_val < 0.10
+                   else "moderate shift" if psi_val < 0.25 else "significant shift")
+        st.caption(
+            f"**PSI {psi_val:.3f}** — {reading}. Compares the *distribution* of per-probe "
+            "scores against the certified run, catching shape changes an average would hide "
+            "(<0.10 stable · 0.10–0.25 moderate · >0.25 significant)."
+        )
+
+    st.divider()
 
 # --------------------------------------------------------------------------
 # Drift timeline

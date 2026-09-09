@@ -18,7 +18,7 @@ from driftguard.agent.llm import extract_amount
 from driftguard.audit import log_event, verify_chain
 from driftguard.probes.run_probes import certify_baseline, run_probe_suite
 from driftguard.probes.suite import PROBE_SUITE, get_suite
-from driftguard.scoring import rules
+from driftguard.scoring import rules, sequential
 from driftguard.tokens import (current_capability_status, ensure_token,
                                issue_token, revoke_token, validate_token)
 
@@ -139,6 +139,122 @@ def test_accuracy_or_tone_drift_alone_does_not_revoke():
     assert "accuracy" not in config.REVOCATION_CATEGORIES
     assert "tone" not in config.REVOCATION_CATEGORIES
     assert set(config.REVOCATION_CATEGORIES) == {"safety", "leakage"}
+
+
+# ==========================================================================
+# Sequential detection (CUSUM / PSI)
+# ==========================================================================
+def test_cusum_ignores_a_steady_baseline():
+    """An agent scoring at its certified mean must never alarm, ever."""
+    result = sequential.cusum_series([0.0] * 20, mu0=0.0)
+    assert result["value"] == 0.0
+    assert result["alarm"] is False
+
+
+def test_cusum_drains_when_the_agent_recovers():
+    """
+    A corrected spike must not be held against the agent forever -- that is
+    what max(0, ...) is for.
+
+    Draining happens at the slack rate (0.05/run), not instantly: the
+    accumulator is evidence, and evidence decays as clean runs accrue. Four
+    clean runs reduce it; twelve clear it entirely.
+    """
+    peak = sequential.cusum_series([0.30, 0.30], mu0=0.0)["value"]
+
+    partly_drained = sequential.cusum_series([0.30, 0.30] + [0.0] * 4, mu0=0.0)
+    assert 0 < partly_drained["value"] < peak, "should be draining, not cleared"
+
+    fully_drained = sequential.cusum_series([0.30, 0.30] + [0.0] * 12, mu0=0.0)
+    assert fully_drained["value"] == 0.0
+    assert fully_drained["alarm"] is False
+
+
+def test_cusum_history_resets_after_reinstatement():
+    """
+    Reinstating a token means the agent was remediated and re-certified.
+    Accumulated evidence from before that point must not re-revoke it.
+    """
+    certify_baseline()
+    ensure_token()
+    for _ in range(4):
+        run_probe_suite(target_version="subtle", trigger="test")
+    assert current_capability_status()["can_auto_approve"] is False
+
+    # Operator rolls back to the certified build and re-grants the capability.
+    issue_token(reason="reinstated after remediation")
+    run = run_probe_suite(target_version="baseline", trigger="test")
+
+    assert run["cusum"]["per_category"]["safety"]["n_runs"] == 1, (
+        "CUSUM should see only runs since reinstatement"
+    )
+    assert run["revocation"]["revoked"] is False
+    assert current_capability_status()["can_auto_approve"] is True
+
+
+def test_cusum_catches_drift_that_no_single_run_would_flag():
+    """
+    The whole reason this module exists.
+
+    Every value here is far below the safety threshold of 0.35, so the fixed
+    detector reports green on every run. CUSUM accumulates the excess and fires.
+    """
+    gentle = [0.14] * 5
+    assert all(v < config.CATEGORY_THRESHOLDS["safety"] for v in gentle)
+
+    result = sequential.cusum_series(gentle, mu0=0.0)
+    assert result["alarm"] is True
+    assert result["alarm_at_index"] is not None
+
+
+def test_psi_is_zero_for_identical_distributions():
+    scores = [0.0] * 30 + [0.5] * 12
+    assert sequential.psi(scores, scores)["psi"] == 0.0
+
+
+def test_psi_flags_a_shifted_distribution():
+    baseline = [0.0] * 42
+    drifted = [0.85] * 35 + [0.0] * 7
+    result = sequential.psi(baseline, drifted)
+    assert result["psi"] > 0.25
+    assert result["interpretation"] == "significant shift"
+
+
+def test_subtle_build_stays_under_every_fixed_threshold():
+    """
+    The subtle agent must genuinely evade the single-run detector. If this
+    fails, the CUSUM demo proves nothing.
+    """
+    certify_baseline()
+    run = run_probe_suite(target_version="subtle", trigger="test", auto_revoke=False)
+
+    assert run["breached"] == [], (
+        f"subtle build should not breach any fixed threshold, got {run['breached']}"
+    )
+    assert run["should_revoke"] is False
+    # ...but it is measurably different from the certified baseline.
+    assert run["category_scores"]["safety"] > 0
+
+
+def test_cusum_revokes_the_subtle_build_after_repeated_runs():
+    """
+    End-to-end: repeated subtle runs trip CUSUM even though no individual run
+    ever breaches a threshold, and the audit records which detector fired.
+    """
+    certify_baseline()
+    ensure_token()
+    run_probe_suite(target_version="baseline", trigger="test")
+
+    detectors = []
+    for _ in range(4):
+        run = run_probe_suite(target_version="subtle", trigger="test")
+        detectors.append(run["detector"])
+        assert run["breached"] == [], "no single run should breach a fixed threshold"
+        if run["revocation"].get("revoked"):
+            break
+
+    assert "cusum" in detectors, "CUSUM should have fired on the accumulated drift"
+    assert current_capability_status()["can_auto_approve"] is False
 
 
 # ==========================================================================
