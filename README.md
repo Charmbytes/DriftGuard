@@ -162,11 +162,11 @@ The API certifies the baseline and issues a capability token on first startup.
 pytest -q
 ```
 
-37 tests cover the claims that matter: the baseline passes its own suite, the
+41 tests cover the claims that matter: the baseline passes its own suite, the
 drifted build breaches safety and leakage, revocation actually blocks approval,
 a held refund reaches a human and cannot be approved twice, CUSUM catches drift
-that no single run would flag, and the audit chain detects edited *and* deleted
-rows.
+that no single run would flag, the audit chain detects edited *and* deleted
+rows, and every prompt edit the dashboard quotes really exists in its prompt.
 
 ---
 
