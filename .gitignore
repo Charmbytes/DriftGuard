@@ -91,3 +91,6 @@ desktop.ini
 
 # Generated static site (built by scripts/build_site.py)
 site/
+
+# Hugging Face Space build output (scripts/make_space.py)
+space/

@@ -453,6 +453,40 @@ push to `main` then redeploys automatically.
 
 `site/` is gitignored — it is build output, regenerated on each deploy.
 
+### Live demo on Hugging Face Spaces
+
+The full, clickable prototype runs on a free Hugging Face **Docker Space**,
+which provides a long-running container with enough memory for the embedding
+model. A Space exposes one public port, so `deploy/huggingface/` runs both
+processes in a single container: the API listens on `127.0.0.1:8000` (inside
+the container only) and the dashboard serves the public port `7860`.
+
+One-time setup:
+
+1. Create a free account at huggingface.co.
+2. Under **Settings → Access Tokens**, create a token with **Write** access.
+3. Log in on your machine and paste the token when asked:
+
+```bash
+hf auth login
+```
+
+Then build and upload (replace `yourname` with your Hugging Face username):
+
+```bash
+python scripts/make_space.py --push yourname/DriftGuard
+```
+
+The script copies the app and the files in `deploy/huggingface/` into
+`space/` (gitignored), creates the Space if it does not exist, and uploads it.
+The first build takes several minutes; after that the demo is live at
+`https://huggingface.co/spaces/yourname/DriftGuard`. Re-run the same command
+after any code change to update it.
+
+Two things to know about the public demo: every visitor shares one demo state
+(**Reset demo** puts it back), and the free tier's disk is wiped when the Space
+restarts, which the API handles by re-certifying on startup.
+
 ---
 
 ## Explainer for non-technical audiences
@@ -564,6 +598,8 @@ driftguard/
 │       └── drift.py         # Drift Detector: blend, aggregate, decide
 ├── dashboard/app.py         # Streamlit dashboard
 ├── scripts/demo.py          # scripted end-to-end demo
+├── scripts/make_space.py    # build/upload the Hugging Face Space
+├── deploy/huggingface/      # Space Dockerfile, start script, Space README
 ├── tests/                   # pytest suite
 ├── Dockerfile.api
 ├── Dockerfile.dashboard
