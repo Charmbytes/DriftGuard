@@ -186,12 +186,45 @@ rows.
    the enforcement notice and a queued approval reference `#HR-0001`.
 7. **Human approvals** tab → the held refund is waiting; approve it as a
    reviewer. The customer still gets their money — a person authorised it.
-8. **Evidence** tab → the probes that caused it, baseline vs live response
+8. **Why did it drift?** tab → the plain-English account: which lines of the
+   agent's instructions were edited, what each edit made it do wrong, and
+   which test questions caught it. Start here with a non-technical audience.
+9. **Evidence** tab → the probes that caused it, baseline vs live response
    side by side.
-9. **Audit log** tab → **Verify hash chain** → intact, N rows from genesis.
+10. **Audit log** tab → **Verify hash chain** → intact, N rows from genesis.
 
 End to end in well under a minute — the probe run itself takes about a second
 once the embedding model is warm.
+
+### Reading the dashboard if you are new to all of this
+
+The dashboard opens with a **"New here?"** panel: what the agent is, what drift
+is, the five-step loop, and a short glossary (probe, baseline, build, drift
+score, threshold, capability token, CUSUM, audit log). Two views exist purely
+to explain what the LLM is doing:
+
+- **Why did it drift?** — three steps.
+  1. *What someone changed.* Each edit to the system prompt is shown as
+     ADDED / DELETED / CHANGED, quoted word for word, with a one-line meaning
+     ("the hard spending limit became a 'guideline'"). An expander shows the
+     whole prompt as a coloured line-by-line diff.
+  2. *What the bot started doing wrong.* One chain per kind of damage —
+     *edits → behaviour change → number of test questions that caught it* —
+     with a real example: what the customer wrote, what the certified bot
+     did, what the live bot did.
+  3. *Every failed question*, each with its problems in plain words and the
+     technical violation code underneath.
+- **Live agent** — sending a message now shows six numbered steps: the
+  message, the exact instructions the LLM was given, the raw JSON it wrote,
+  the decision DriftGuard read from it, the permission-token check, and the
+  final outcome. **Ask the approved bot and the live bot** sends the same
+  message to both builds side by side, with no side effects.
+
+The explanation layer lives in `driftguard/explain.py`. It only *reads* scored
+results — it never changes a score or a decision — so it cannot disagree with
+the verdict. Linking an edit to a failure is a hand-written mapping (an edit is
+named as a likely cause when it was expected to produce that kind of
+violation), which is an explanation aid rather than a causal proof.
 
 ### The second demo: catching drift no threshold would catch
 
@@ -468,12 +501,15 @@ This is the standard denylist pattern, kept in one inspectable table.
 | `POST` | `/api/agent/message` | Send a message to the agent (token enforced) |
 | `POST` | `/api/agent/version` | Swap the live build — inject/undo drift |
 | `GET`  | `/api/agent/info` | Live build, provider, cap |
+| `GET`  | `/api/agent/prompts` | Certified vs live system prompt, diff, and named edits |
+| `POST` | `/api/agent/compare` | Same message to certified and live build (no side effects) |
 | `POST` | `/api/probes/run` | Trigger a shadow-test run |
 | `GET`  | `/api/probes/suite` | The probe suite with rationales |
 | `POST` | `/api/probes/certify` | (Re)certify the baseline |
 | `GET`  | `/api/certification/status` | Scores + token status (dashboard poll) |
 | `GET`  | `/api/certification/runs` | Run history for the timeline |
 | `GET`  | `/api/certification/runs/{id}` | Per-probe evidence for one run |
+| `GET`  | `/api/certification/runs/{id}/story` | Plain-English account of why a run drifted |
 | `GET`  | `/api/token` | Current capability status |
 | `GET`  | `/api/token/history` | Every token issued |
 | `POST` | `/api/token/reinstate` | Re-grant after remediation |
@@ -512,6 +548,7 @@ driftguard/
 │   ├── audit.py             # hash chain: append and verify
 │   ├── tokens.py            # capability-token broker (issue/validate/revoke)
 │   ├── approvals.py         # human-in-the-loop queue for held refunds
+│   ├── explain.py           # plain-English layer: prompt diff, edit -> failure links
 │   ├── scheduler.py         # APScheduler re-certification loop
 │   ├── api.py               # FastAPI service
 │   ├── agent/

@@ -12,7 +12,7 @@ import json
 
 import pytest
 
-from driftguard import approvals, config, db
+from driftguard import approvals, config, db, explain
 from driftguard.agent import refund_agent
 from driftguard.agent.llm import extract_amount
 from driftguard.audit import log_event, verify_chain
@@ -485,3 +485,51 @@ def test_actual_policy_text_is_flagged():
         "and the retention desk holds a goodwill budget."
     )
     assert rules.find_leaks(leaked)
+
+
+# ==========================================================================
+# Plain-English explanations
+# ==========================================================================
+def test_every_quoted_prompt_edit_appears_in_its_prompt():
+    """The 'Why did it drift?' tab quotes prompts; a stale quote would mislead."""
+    from driftguard.agent.prompts import AGENT_VERSIONS
+    def flat(text):  # prompts wrap mid-sentence; compare ignoring line breaks
+        return " ".join(text.split())
+
+    base = flat(AGENT_VERSIONS["baseline"]["system_prompt"])
+    for version, edits in explain.PROMPT_EDITS.items():
+        live = flat(AGENT_VERSIONS[version]["system_prompt"])
+        for e in edits:
+            # Removed text lives in the baseline; added/changed text in the build.
+            source = base if e["kind"] == "removed" else live
+            for fragment in e["quote"].split(" ... "):
+                assert fragment.rstrip(".") in source, (version, e["id"])
+            if e.get("was"):
+                assert e["was"] in base, (version, e["id"])
+
+
+def test_every_violation_code_has_a_plain_explanation():
+    codes = {"CAP_EXCEEDED", "UNSAFE_APPROVAL", "POLICY_LEAK", "OVER_CAUTIOUS",
+             "MISCLASSIFIED", "MALFORMED_OUTPUT", "AGENT_ERROR"}
+    assert codes <= set(explain.VIOLATION_PLAIN)
+
+
+def test_drift_story_links_failures_to_prompt_edits():
+    certify_baseline()
+    refund_agent.set_active_version("drifted")
+    run = run_probe_suite(trigger="test")
+    story = explain.drift_story(run["results"], "drifted")
+
+    assert story["n_flagged"] > 0
+    groups = {c["group"]: c for c in story["chains"]}
+    assert {"limit", "secrets"} <= set(groups)
+    # Each chain's example should illustrate its own kind of failure.
+    assert all(p["code"] == "POLICY_LEAK" for p in groups["secrets"]["example"]["problems"])
+
+
+def test_drift_story_is_empty_for_the_certified_build():
+    certify_baseline()
+    run = run_probe_suite(target_version="baseline", trigger="test")
+    story = explain.drift_story(run["results"], "baseline")
+    assert story["n_flagged"] == 0
+    assert story["chains"] == []

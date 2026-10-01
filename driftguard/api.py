@@ -6,6 +6,8 @@ Endpoint map:
   POST /api/agent/message        talk to the agent (capability token enforced)
   POST /api/agent/version        swap the live build -- the "inject drift" lever
   GET  /api/agent/info           which build is live, provider, cap
+  GET  /api/agent/prompts        certified vs live system prompt, with the edits
+  POST /api/agent/compare        same message to certified and live build, side by side
 
   POST /api/probes/run           trigger a shadow-test run
   GET  /api/probes/suite         the probe suite itself
@@ -14,6 +16,7 @@ Endpoint map:
   GET  /api/certification/status current scores + token status (dashboard poll)
   GET  /api/certification/runs   run history for the timeline chart
   GET  /api/certification/runs/{id}  per-probe detail for one run
+  GET  /api/certification/runs/{id}/story  plain-English account of why it drifted
 
   GET  /api/token                current capability status
   GET  /api/token/history        every token ever issued
@@ -37,7 +40,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from . import approvals, config
+from . import approvals, config, explain
 from .agent import refund_agent
 from .agent.prompts import AGENT_VERSIONS
 from .audit import get_log, log_event, verify_chain
@@ -178,6 +181,37 @@ def set_agent_version(req: VersionRequest) -> Dict[str, Any]:
 @app.get("/api/agent/info")
 def agent_info() -> Dict[str, Any]:
     return refund_agent.agent_info()
+
+
+@app.get("/api/agent/prompts")
+def agent_prompts(version: Optional[str] = Query(None)) -> Dict[str, Any]:
+    """The certified system prompt next to the live one, and what was edited."""
+    version = version or refund_agent.get_active_version()
+    if version not in AGENT_VERSIONS:
+        raise HTTPException(status_code=400, detail=f"Unknown version '{version}'.")
+    return explain.prompt_comparison(version)
+
+
+@app.post("/api/agent/compare")
+def agent_compare(req: MessageRequest) -> Dict[str, Any]:
+    """
+    Ask the certified build and the live build the same question.
+
+    Both calls use the shadow path (no token enforcement, no approval queue),
+    so this has no side effects -- it only shows how the two builds differ.
+    """
+    if not req.message.strip():
+        raise HTTPException(status_code=400, detail="message must not be empty")
+    live_version = req.version or refund_agent.get_active_version()
+    baseline = refund_agent.handle_message(req.message, version="baseline", enforce_token=False)
+    live = refund_agent.handle_message(req.message, version=live_version, enforce_token=False)
+    return {
+        "message": req.message,
+        "baseline": baseline,
+        "live": live,
+        "same_decision": baseline["decision"] == live["decision"],
+        "differences": explain.compare_decisions(baseline, live),
+    }
 
 
 # ==========================================================================
@@ -337,6 +371,22 @@ def certification_run_detail(run_id: int) -> Dict[str, Any]:
         results.append(d)
 
     return {"run": run_d, "results": results}
+
+
+@app.get("/api/certification/runs/{run_id}/story")
+def certification_run_story(run_id: int) -> Dict[str, Any]:
+    """Plain-English explanation of one run: what went wrong and the likely cause."""
+    detail = certification_run_detail(run_id)
+    with get_conn() as conn:
+        base = {r["probe_id"]: r["decision"] for r in
+                conn.execute("SELECT probe_id, decision FROM baseline_responses").fetchall()}
+    expected = {p["id"]: p["expected_decision"] for p in get_suite()}
+    for r in detail["results"]:
+        r["baseline_decision"] = base.get(r["probe_id"])
+        r["expected_decision"] = expected.get(r["probe_id"])
+    story = explain.drift_story(detail["results"], detail["run"]["agent_version"])
+    story["run"] = detail["run"]
+    return story
 
 
 # ==========================================================================
